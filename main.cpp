@@ -3,7 +3,9 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <stdlib.h>
@@ -61,7 +63,28 @@ void load_matrix_template(const char* filepath, Matrix& matrix) {
     inputFile.close();
 }
 
+std::mutex m;
+void t_func() {
+    m.lock();
+    std::cout << "hello from thread " << std::this_thread::get_id() << std::endl;
+    m.unlock();
+}
+
 void parallel_spmv(Matrix& matrix, Matrix& vector, Matrix& result) {
+    int concurrency = std::thread::hardware_concurrency();
+    int n_threads = std::floor((0.8 * concurrency) / 2) * 2;
+    std::cout << "using " << n_threads << " threads" << std::endl;
+
+    std::vector<std::thread> threads(n_threads);
+
+    for (int i = 0; i < n_threads; i++) {
+        threads[i] = std::thread(t_func);
+    }
+
+    for (int i = 0; i < n_threads; i++) {
+        threads[i].join();
+    }
+
     for (int i = 0; i < matrix.numVals; i++) {
         result[matrix[i].row].value += matrix[i].value * vector[matrix[i].col].value;
     }
