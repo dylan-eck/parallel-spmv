@@ -118,8 +118,7 @@ void t_func(
 
 void parallel_spmv(Matrix& matrix, std::vector<double>& vector, std::vector<double>& result) {
     int concurrency = std::thread::hardware_concurrency();
-    // int n_threads = std::floor((0.8 * concurrency) / 2) * 2;
-    int n_threads = 2;
+    int n_threads = std::floor((0.8 * concurrency) / 2) * 2;
     long chunk_size = matrix.numRows / n_threads;
 
     std::vector<std::thread> threads(n_threads);
