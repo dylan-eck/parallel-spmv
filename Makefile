@@ -1,5 +1,5 @@
 out: main.o
-	g++ -pthread main.o -o out 
+	g++ -pthread -fopenmp main.o -o out 
 
 main.o: main.cpp
 	g++ -I/usr/include/eigen3 -O3 -c main.cpp
