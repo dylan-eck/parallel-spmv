@@ -1,9 +1,9 @@
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -14,8 +14,6 @@
 #define EIGEN_MPL2_ONLY // only use portions of Eigen that have an MPL2 license 
 #include <Eigen/Sparse>
 #include <Eigen/Dense>
-
-#include <omp.h>
 
 struct Element {
     long row;
@@ -34,6 +32,11 @@ struct Matrix {
     std::vector<Element> elements;
     std::vector<long> row_indexes;
 };
+
+// these variables are global for easy access from threads
+Matrix g_matrix;
+std::vector<double> g_vector;
+std::vector<double> g_result;
 
 void load_matrix_template(const char* filepath, Matrix& matrix) {
     std::string line;
@@ -77,81 +80,47 @@ void load_matrix_template(const char* filepath, Matrix& matrix) {
     }
     matrix.row_indexes[matrix.numRows] = matrix.numVals;
 
-    // for (const auto& e : matrix.elements) {
-    //     std::cout << e.row << " " << e.col << " " << e.value << std::endl;
-    // }
-    // std::cout << std::endl;
-
-    // std::cout << "0 1 2 3 4 5 6 7" << std::endl;
-    // for (const auto& idx : matrix.row_indexes) {
-    //     std::cout << idx << " ";
-    // }
-    // std::cout << std::endl << std::endl;
-
     inputFile.close();
 }
 
-std::mutex m;
-void t_func(
-    long s_idx,
-    long e_idx,
-    const Matrix& matrix,
-    const std::vector<double>& vector,
-    std::vector<double>& result
-    ) {
-
+void t_func(int t_num, int n_threads) {
+    long chunk_size = g_matrix.numRows / n_threads;
+    long s_idx = t_num * chunk_size;
+    long e_idx;
+    if (t_num < n_threads - 1) {
+        e_idx = s_idx + chunk_size;
+    } else {
+        e_idx = g_matrix.numRows;
+    }
 
     for (int i = s_idx; i < e_idx; ++i) {
-        long rstart = matrix.row_indexes[i];
-        long rend = matrix.row_indexes[i + 1];
+        long rstart = g_matrix.row_indexes[i];
+        long rend = g_matrix.row_indexes[i + 1];
         if (rstart == rend) continue;
 
         double accum = 0;
         for (int j = rstart; j < rend; ++j) {
-            double a = matrix.elements[j].value;
-            double b = vector[matrix.elements[j].col];
+            double a = g_matrix.elements[j].value;
+            double b = g_vector[g_matrix.elements[j].col];
             accum += a * b;
         }
-        result[i] = accum;
+        g_result[i] = accum;
     }
 }
 
-void parallel_spmv(Matrix& matrix, std::vector<double>& vector, std::vector<double>& result) {
+void parallel_spmv() {
     int concurrency = std::thread::hardware_concurrency();
     int n_threads = std::floor((0.8 * concurrency) / 2) * 2;
-    long chunk_size = matrix.numRows / n_threads;
 
     std::vector<std::thread> threads(n_threads);
 
     for (int i = 0; i < n_threads; i++) {
-        long s_idx = i * chunk_size;
-        long e_idx;
-        if (i < n_threads - 1) {
-            e_idx = s_idx + chunk_size;
-        } else {
-            e_idx = matrix.numRows;
-    }
-
-        threads[i] = std::thread(t_func, s_idx, e_idx, matrix, vector, std::ref(result));
+        threads[i] = std::thread(t_func, i, n_threads);
     }
 
     for (int i = 0; i < n_threads; i++) {
         threads[i].join();
     }
-
-    // for (int i = 0; i < matrix.numRows; ++i) {
-    //     long rstart = matrix.row_indexes[i];
-    //     long rend = matrix.row_indexes[i + 1];
-    //     if (rstart == rend) continue;
-
-    //     double accum = 0;
-    //     for (int j = rstart; j < rend; ++j) {
-    //         double a = matrix.elements[j].value;
-    //         double b = vector[matrix.elements[j].col];
-    //         accum += a * b;
-    //     }
-    //     result[i] = accum;
-    // }
 }
 
 bool verify_result(
@@ -199,22 +168,23 @@ int main(int argc, char const *argv[])
     float exec_times[3]{};
 
     for (int i = 0; i < 3; i++) {
-        Matrix matrix;
-        load_matrix_template(input_files[i], matrix);
+        load_matrix_template(input_files[i], g_matrix);
 
-        std::vector<double> vector(matrix.numCols);
+        g_vector.resize(g_matrix.numCols);
         std::generate(
-            vector.begin(),
-            vector.end(),
+            g_vector.begin(),
+            g_vector.end(),
             []() {return (double)rand() / RAND_MAX * 4.8f + 0.1f;}
         );
 
-        std::vector<double> result(matrix.numCols);
-        std::fill(result.begin(), result.end(), 0.0f);
+        g_result.resize(g_matrix.numCols);
+        for (int i = 0; i < g_result.size(); ++i) {
+            g_result[i] = 0;
+        }
 
         auto startTimePoint = std::chrono::high_resolution_clock::now();
 
-        parallel_spmv(matrix, vector, result);
+        parallel_spmv();
 
         auto endTimePoint = std::chrono::high_resolution_clock::now();
 
@@ -231,7 +201,7 @@ int main(int argc, char const *argv[])
         float duration = (tend - tstart) * 0.001f;
         exec_times[i] = duration;
 
-        bool correct = verify_result(matrix, vector, result);
+        bool correct = verify_result(g_matrix, g_vector, g_result);
         if (!correct) {
             throw std::runtime_error(
                 "matrix multiplication produced incorrect result"
