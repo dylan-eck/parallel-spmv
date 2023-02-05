@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define EIGEN_MPL2_ONLY // only use portions of Eigen that have an MPL2 license 
+#define EIGEN_MPL2_ONLY // only use portions of Eigen that have an MPL2 license
 #include <Eigen/Sparse>
 #include <Eigen/Dense>
 
@@ -154,6 +154,28 @@ bool verify_result(
     return true;
 }
 
+float time_function(void (*func)(void))
+{
+    auto startTimePoint = std::chrono::high_resolution_clock::now();
+
+    func();
+
+    auto endTimePoint = std::chrono::high_resolution_clock::now();
+
+    auto tstart =
+        std::chrono::time_point_cast<std::chrono::microseconds>(startTimePoint)
+        .time_since_epoch()
+        .count();
+
+    auto tend =
+        std::chrono::time_point_cast<std::chrono::microseconds>(endTimePoint)
+        .time_since_epoch()
+        .count();
+
+    float duration = (tend - tstart) * 0.001f;
+    return duration;
+}
+
 int main(int argc, char const *argv[])
 {
     std::srand(std::time(NULL));
@@ -182,24 +204,7 @@ int main(int argc, char const *argv[])
             g_result[i] = 0;
         }
 
-        auto startTimePoint = std::chrono::high_resolution_clock::now();
-
-        parallel_spmv();
-
-        auto endTimePoint = std::chrono::high_resolution_clock::now();
-
-        auto tstart =
-            std::chrono::time_point_cast<std::chrono::microseconds>(startTimePoint)
-            .time_since_epoch()
-            .count();
-
-        auto tend =
-            std::chrono::time_point_cast<std::chrono::microseconds>(endTimePoint)
-            .time_since_epoch()
-            .count();
-
-        float duration = (tend - tstart) * 0.001f;
-        exec_times[i] = duration;
+        exec_times[i] = time_function(parallel_spmv);
 
         bool correct = verify_result(g_matrix, g_vector, g_result);
         if (!correct) {
